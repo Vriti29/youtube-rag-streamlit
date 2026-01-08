@@ -45,6 +45,12 @@ st.sidebar.markdown(
 # ---------------- FUNCTIONS ----------------
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    TranscriptsDisabled,
+    NoTranscriptFound
+)
+
 def get_transcript(url):
     try:
         video_id = url.split("v=")[1].split("&")[0]
@@ -56,15 +62,15 @@ def get_transcript(url):
         except:
             transcript = transcript_list.find_generated_transcript(["en", "hi"])
 
-        fetched = transcript.fetch()
-        return " ".join([item["text"] for item in fetched])
+        transcript_data = transcript.fetch()
 
-    except TranscriptsDisabled:
-        return None
-    except NoTranscriptFound:
+        return " ".join(item["text"] for item in transcript_data)
+
+    except (TranscriptsDisabled, NoTranscriptFound):
         return None
     except Exception as e:
         return None
+
 
 
 def build_vectorstore(text):
