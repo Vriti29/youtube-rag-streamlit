@@ -50,6 +50,11 @@ from youtube_transcript_api import (
     TranscriptsDisabled,
     NoTranscriptFound
 )
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    TranscriptsDisabled,
+    NoTranscriptFound
+)
 
 def get_transcript(url):
     try:
@@ -68,10 +73,8 @@ def get_transcript(url):
 
     except (TranscriptsDisabled, NoTranscriptFound):
         return None
-    except Exception as e:
+    except Exception:
         return None
-
-
 
 def build_vectorstore(text):
     splitter = RecursiveCharacterTextSplitter(
@@ -158,3 +161,4 @@ if user_input and st.session_state.vectorstore:
         "role": "assistant",
         "content": response
     })
+
