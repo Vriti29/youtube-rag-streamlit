@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
+from youtube_transcript_api import YouTubeTranscriptApi
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -9,38 +9,50 @@ from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain_core.output_parsers import StrOutputParser
 
-# ---------------- CONFIG ----------------
-st.set_page_config(page_title="YouTube RAG Assistant", layout="centered")
-st.title("🎥 YouTube Video Q&A + Summary (RAG)")
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(page_title="Chat with YouTube Videos (RAG)")
+st.title("🤖 Chat with YouTube Videos (RAG)")
 
-# ---------------- API KEY ----------------
-groq_api_key = os.getenv("GROQ_API_KEY")
+# ---------------- SESSION STATE ----------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-if not groq_api_key:
-    st.error("❌ GROQ_API_KEY not found. Please set it in Streamlit secrets.")
-    st.stop()
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+
+# ---------------- SIDEBAR ----------------
+st.sidebar.header("Configuration")
+
+groq_api_key = st.sidebar.text_input(
+    "Enter Groq API Key",
+    type="password"
+)
+
+youtube_url = st.sidebar.text_input(
+    "Enter YouTube Video URL"
+)
+
+process_btn = st.sidebar.button("Process Video")
+
+st.sidebar.markdown(
+    """
+**Note:**  
+- Model: `llama-3.3-70b-versatile`  
+- Embeddings: `all-MiniLM-L6-v2`
+"""
+)
 
 # ---------------- FUNCTIONS ----------------
+def get_transcript(url):
+    video_id = url.split("v=")[1].split("&")[0]
+    transcript = YouTubeTranscriptApi.fetch(video_id, languages=["en", "hi"])
+    return " ".join([t.text for t in transcript])
 
-def get_transcript(youtube_url):
-    try:
-        video_id = youtube_url.split("v=")[1].split("&")[0]
-        transcript_data = YouTubeTranscriptApi.fetch(
-            video_id, languages=["en", "hi"]
-        )
-        return " ".join([i.text for i in transcript_data])
-    except TranscriptsDisabled:
-        return None
-    except Exception as e:
-        return None
-
-
-@st.cache_resource
-def create_vector_store(transcript):
+def build_vectorstore(text):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000, chunk_overlap=200
     )
-    docs = splitter.create_documents([transcript])
+    docs = splitter.create_documents([text])
 
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -48,18 +60,16 @@ def create_vector_store(transcript):
 
     return FAISS.from_documents(docs, embeddings)
 
+def answer_question(question):
+    retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4})
+    docs = retriever.invoke(question)
 
-def run_rag(question, vector_store):
-    retriever = vector_store.as_retriever(search_kwargs={"k": 4})
-
-    retrieved_docs = retriever.invoke(question)
-    context = "\n\n".join(doc.page_content for doc in retrieved_docs)
+    context = "\n\n".join(d.page_content for d in docs)
 
     prompt = PromptTemplate(
         template="""
-You are an assistant.
-Answer the question using ONLY the information given in the transcript.
-If the answer is not present, say "I don't know".
+Answer the question using ONLY the context below.
+If not present, say "I don't know".
 
 Context:
 {context}
@@ -79,34 +89,41 @@ Question:
     chain = prompt | llm | StrOutputParser()
     return chain.invoke({"context": context, "question": question})
 
+# ---------------- PROCESS VIDEO ----------------
+if process_btn:
+    if not groq_api_key or not youtube_url:
+        st.sidebar.error("Please enter API key and YouTube URL")
+    else:
+        with st.spinner("Splitting text and creating embeddings..."):
+            transcript = get_transcript(youtube_url)
+            st.session_state.vectorstore = build_vectorstore(transcript)
 
-# ---------------- UI ----------------
+        st.success("Video processed successfully!")
 
-youtube_url = st.text_input("🔗 Enter YouTube Video URL")
+# ---------------- DISPLAY CHAT HISTORY ----------------
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-if youtube_url:
-    with st.spinner("Fetching transcript..."):
-        transcript = get_transcript(youtube_url)
+# ---------------- CHAT INPUT ----------------
+user_input = st.chat_input("Ask something from the video...")
 
-    if not transcript:
-        st.error("❌ Transcript not available for this video.")
-        st.stop()
+if user_input and st.session_state.vectorstore:
+    # User message
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input
+    })
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-    st.success("✅ Transcript loaded")
-
-    with st.spinner("Creating embeddings & vector store..."):
-        vector_store = create_vector_store(transcript)
-
-    question = st.text_input("💬 Ask a question from the video")
-
-    if st.button("Get Answer") and question:
+    # Assistant response
+    with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            answer = run_rag(question, vector_store)
-        st.subheader("📌 Answer")
-        st.write(answer)
+            response = answer_question(user_input)
+            st.markdown(response)
 
-    if st.button("Generate Video Summary"):
-        with st.spinner("Generating summary..."):
-            summary = run_rag("Write summary of this video", vector_store)
-        st.subheader("📝 Summary")
-        st.write(summary)
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": response
+    })
