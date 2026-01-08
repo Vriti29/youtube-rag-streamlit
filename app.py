@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi,TranscriptsDisabled, NoTranscriptFound
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -43,10 +43,29 @@ st.sidebar.markdown(
 )
 
 # ---------------- FUNCTIONS ----------------
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+
 def get_transcript(url):
-    video_id = url.split("v=")[1].split("&")[0]
-    transcript = YouTubeTranscriptApi.fetch(video_id, languages=["en", "hi"])
-    return " ".join([t.text for t in transcript])
+    try:
+        video_id = url.split("v=")[1].split("&")[0]
+
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+        try:
+            transcript = transcript_list.find_manually_created_transcript(["en", "hi"])
+        except:
+            transcript = transcript_list.find_generated_transcript(["en", "hi"])
+
+        fetched = transcript.fetch()
+        return " ".join([item["text"] for item in fetched])
+
+    except TranscriptsDisabled:
+        return None
+    except NoTranscriptFound:
+        return None
+    except Exception as e:
+        return None
+
 
 def build_vectorstore(text):
     splitter = RecursiveCharacterTextSplitter(
@@ -96,7 +115,13 @@ if process_btn:
     else:
         with st.spinner("Splitting text and creating embeddings..."):
             transcript = get_transcript(youtube_url)
+
+            if not transcript:
+                st.error("❌ Transcript not available for this video.")
+                st.stop()
+
             st.session_state.vectorstore = build_vectorstore(transcript)
+
 
         st.success("Video processed successfully!")
 
