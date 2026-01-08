@@ -22,6 +22,12 @@ if "vectorstore" not in st.session_state:
 
 # ---------------- SIDEBAR ----------------
 st.sidebar.header("Configuration")
+manual_transcript = st.sidebar.text_area(
+    "Paste transcript manually (if auto fetch fails)",
+    height=200,
+    placeholder="Paste the full video transcript here..."
+)
+
 
 groq_api_key = st.sidebar.text_input(
     "Enter Groq API Key",
@@ -122,15 +128,19 @@ if process_btn:
     if not groq_api_key or not youtube_url:
         st.sidebar.error("Please enter API key and YouTube URL")
     else:
-        with st.spinner("Splitting text and creating embeddings..."):
-            transcript = get_transcript(youtube_url)
+       with st.spinner("Processing video..."):
+           transcript = get_transcript(youtube_url)
 
-            if not transcript:
-                st.error("❌ Transcript not available for this video.")
-                st.stop()
+           # 🔁 FALLBACK TO MANUAL TRANSCRIPT
+           if not transcript and manual_transcript.strip():
+               transcript = manual_transcript
+               st.info("ℹ️ Using manually pasted transcript.")
 
-            st.session_state.vectorstore = build_vectorstore(transcript)
+           if not transcript:
+               st.error("❌ Transcript not available. Please paste transcript manually.")
+               st.stop()
 
+           st.session_state.vectorstore = build_vectorstore(transcript)
 
         st.success("Video processed successfully!")
 
@@ -161,4 +171,5 @@ if user_input and st.session_state.vectorstore:
         "role": "assistant",
         "content": response
     })
+
 
